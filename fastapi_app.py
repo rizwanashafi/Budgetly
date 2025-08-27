@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-FastAPI OCR Application - Two-Step Image Processing API
-Upload images and extract OCR data in separate steps
+FastAPI OCR Application - Simple Automatic OCR Processing
+Upload images and get extracted data immediately
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Path
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -16,18 +16,19 @@ import os
 import uuid
 import tempfile
 from typing import Dict
+from fastapi.responses import RedirectResponse
 
-# Load environment variables
 load_dotenv()
-
-# Removed CategoryEnum - using universal receipt processing
 
 # Initialize FastAPI app
 app = FastAPI(
     title="OCR Image Processing API",
-    description="Two-step API for uploading images and extracting OCR data",
-    version="4.0.0"
+    description="Simple OCR API - upload images and get extracted data automatically",
+    version="5.0.0"
 )
+@app.get("/", include_in_schema=False) 
+async def root():
+    return RedirectResponse(url="/docs")
 
 # In-memory storage for uploaded images and their metadata
 uploaded_images: Dict[str, Dict] = {}
@@ -46,7 +47,7 @@ def get_gemini_prompt():
 
 {
   "merchant_name": "store/restaurant/pharmacy name or null",
-#   "merchant_contact": "phone number or contact info or null",
+  "merchant_contact": "phone number or contact info or null",
   "transaction_date": "date in YYYY-MM-DD format or null",
   "total_amount": "total amount as number or null",
   "tax": "tax amount as number or null",
@@ -61,12 +62,14 @@ def get_gemini_prompt():
 
 Instructions:
 - Extract merchant_name from any business name visible on the receipt (restaurant, store, pharmacy, etc.)
+- Extract merchant_contact if phone number or contact info is visible, otherwise use null
 - For items array, include ALL line items visible on the receipt
 - If quantity is not explicitly shown, use 1 as default
 - For item_price, extract the price shown for that specific line item
 - Use null for any field where information is missing, unclear, or not visible
 - Ensure all prices are extracted as numbers (not strings)
 - Include as many items as are visible on the receipt
+- Return ONLY valid JSON without any comments or markdown formatting
 
 Important: Only extract information that is clearly visible and readable in the receipt image. Focus on accuracy over completeness."""
 
@@ -87,15 +90,14 @@ async def upload_image(
     file: UploadFile = File(...)
 ):
     """
-    Upload an image file for OCR processing
+    Upload an image file and automatically extract OCR data
 
     Args:
         file: Image file (PNG, JPG, JPEG)
 
     Returns:
-        JSON response with upload confirmation and image ID
+        JSON response with extracted OCR data and image ID
     """
-
     # Validate image file
     if not validate_image_file(file):
         raise HTTPException(
@@ -106,8 +108,6 @@ async def upload_image(
     try:
         # Generate unique image ID
         image_id = str(uuid.uuid4())
-
-        # Read image data
         image_data = await file.read()
 
         # Create temporary file to store the image
@@ -118,52 +118,203 @@ async def upload_image(
         with open(temp_file_path, "wb") as temp_file:
             temp_file.write(image_data)
 
-        # Store image metadata in memory
+        # Load image for processing
+        image = Image.open(temp_file_path)
+        extracted_json = process_image_with_gemini(image)
+
+        # Clean and parse JSON
+        cleaned_json = clean_json_string(extracted_json)
+
+        if not cleaned_json.strip():
+            # Clean up temporary file on error
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "error": "Extracted data appears to be empty after cleaning",
+                    "original_data": extracted_json,
+                    "cleaned_data": cleaned_json
+                }
+            )
+
+        # Parse JSON data
+        try:
+            parsed_data = json.loads(cleaned_json)
+        except json.JSONDecodeError as e:
+            # Clean up temporary file on error
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "error": f"Invalid JSON format: {str(e)}",
+                    "original_data": extracted_json,
+                    "cleaned_data": cleaned_json
+                }
+            )
+
+        # Process and validate data
+        validation_errors = []
+        warnings = []
+
+        # Basic validation for required fields
+        if isinstance(parsed_data, dict):
+            # Validate merchant_name
+            if not parsed_data.get("merchant_name"):
+                warnings.append("Merchant name not found or unclear in the receipt")
+
+            # Validate total_amount
+            total_amount = parsed_data.get("total_amount")
+            if total_amount is not None:
+                try:
+                    float(total_amount)
+                except (ValueError, TypeError):
+                    validation_errors.append("Total amount is not a valid number")
+
+            # Validate items array
+            items = parsed_data.get("items", [])
+            if not items:
+                warnings.append("No line items found in the receipt")
+            else:
+                for i, item in enumerate(items):
+                    if not isinstance(item, dict):
+                        validation_errors.append(f"Item {i+1} is not properly formatted")
+                        continue
+
+                    # Validate item fields
+                    if not item.get("item_name"):
+                        validation_errors.append(f"Item {i+1} is missing item name/description")
+
+                    # Validate item_price
+                    item_price = item.get("item_price")
+                    if item_price is not None:
+                        try:
+                            float(item_price)
+                        except (ValueError, TypeError):
+                            validation_errors.append(f"Item {i+1} has invalid price format")
+
+                    # Validate quantity
+                    quantity = item.get("quantity")
+                    if quantity is not None:
+                        try:
+                            float(quantity)
+                        except (ValueError, TypeError):
+                            validation_errors.append(f"Item {i+1} has invalid quantity format")
+
+        # Store processed data in memory for potential re-access
+        upload_time = pd.Timestamp.now().isoformat()
         uploaded_images[image_id] = {
             "file_path": temp_file_path,
             "filename": file.filename,
             "content_type": file.content_type,
-            "upload_time": pd.Timestamp.now().isoformat()
+            "upload_time": upload_time,
+            "extracted_data": parsed_data,
+            "warnings": warnings,
+            "validation_errors": validation_errors,
+            "processed": True
         }
 
-        return JSONResponse(content={
+        # Prepare response data
+        response_data = {
             "success": True,
             "image_id": image_id,
             "filename": file.filename,
-            "message": "Image uploaded successfully. Use the image_id to extract data."
-        })
+            "extracted_data": parsed_data,
+            "warnings": warnings,
+            "validation_errors": validation_errors,
+            "processing_info": {
+                "image_processed": True,
+                "data_extracted": True,
+                "data_validated": len(validation_errors) == 0,
+                "upload_time": upload_time
+            },
+            "message": "Image uploaded and processed successfully."
+        }
+
+        # Check if there are critical validation errors
+        if validation_errors:
+            response_data["success"] = False
+            response_data["error"] = "Data validation failed"
+
+        return JSONResponse(content=response_data)
 
     except Exception as e:
+        # Clean up temporary file on error
+        try:
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        except:
+            pass
+
         return JSONResponse(
             status_code=500,
             content={
                 "success": False,
-                "error": f"Failed to upload image: {str(e)}"
+                "error": f"Failed to process image: {str(e)}"
             }
         )
 
-@app.get("/extract-data/{image_id}")
-async def extract_data(image_id: str = Path(..., description="Image ID from upload")):
+@app.get("/extract-data")
+async def extract_data():
     """
-    Extract and return OCR data from a previously uploaded image
-
-    Args:
-        image_id: Image ID returned from upload endpoint
+    Retrieve OCR data from the most recently uploaded and processed image
 
     Returns:
-        JSON response with extracted and processed data
+        JSON response with extracted and processed data from the most recent upload
     """
 
-    # Check if image exists
-    if image_id not in uploaded_images:
+    # Check if any images have been uploaded
+    if not uploaded_images:
         raise HTTPException(
             status_code=404,
-            detail="Image not found. Please upload an image first."
+            detail="No images found. Please upload an image first."
         )
+
+    # Find the most recently uploaded image
+    most_recent_image_id = max(uploaded_images.keys(),
+                              key=lambda img_id: uploaded_images[img_id]["upload_time"])
+
+    image_id = most_recent_image_id
 
     image_info = uploaded_images[image_id]
 
     try:
+        # If data was already processed during upload, return cached results
+        if image_info.get("processed", False):
+            response_data = {
+                "success": True,
+                "image_id": image_id,
+                "filename": image_info.get("filename"),
+                "extracted_data": image_info.get("extracted_data"),
+                "warnings": image_info.get("warnings", []),
+                "validation_errors": image_info.get("validation_errors", []),
+                "processing_info": {
+                    "image_processed": True,
+                    "data_extracted": True,
+                    "data_validated": len(image_info.get("validation_errors", [])) == 0,
+                    "upload_time": image_info["upload_time"],
+                    "cached_result": True
+                },
+                "message": "Returning cached OCR data from upload processing."
+            }
+
+            # Check if there are critical validation errors
+            if image_info.get("validation_errors"):
+                response_data["success"] = False
+                response_data["error"] = "Data validation failed"
+
+            return JSONResponse(content=response_data)
+
+        # If not processed yet (fallback for old uploads), process now
         # Load image from temporary file
         if not os.path.exists(image_info["file_path"]):
             raise HTTPException(
@@ -204,7 +355,7 @@ async def extract_data(image_id: str = Path(..., description="Image ID from uplo
                 }
             )
 
-        # Process data in a generic way without category-specific transformations
+        # Process data validation (same logic as upload endpoint)
         validation_errors = []
         warnings = []
 
@@ -256,6 +407,7 @@ async def extract_data(image_id: str = Path(..., description="Image ID from uplo
         response_data = {
             "success": True,
             "image_id": image_id,
+            "filename": image_info.get("filename"),
             "extracted_data": parsed_data,
             "warnings": warnings,
             "validation_errors": validation_errors,
@@ -263,8 +415,10 @@ async def extract_data(image_id: str = Path(..., description="Image ID from uplo
                 "image_processed": True,
                 "data_extracted": True,
                 "data_validated": len(validation_errors) == 0,
-                "upload_time": image_info["upload_time"]
-            }
+                "upload_time": image_info["upload_time"],
+                "cached_result": False
+            },
+            "message": "Image re-processed successfully."
         }
 
         # Check if there are critical validation errors
@@ -298,6 +452,8 @@ async def extract_data(image_id: str = Path(..., description="Image ID from uplo
                 "error": f"Unexpected error during processing: {str(e)}"
             }
         )
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8050))
