@@ -14,6 +14,7 @@ A universal two-step FastAPI REST API that processes receipt images using Google
 - **Temporary Storage**: Images stored temporarily only during processing
 - **Automatic Cleanup**: Images removed after data extraction
 - **Enhanced Error Handling**: Robust error handling and validation
+- --------------
 
 ## Setup Instructions
 
