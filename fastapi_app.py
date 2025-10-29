@@ -39,7 +39,19 @@ if not gemini_api_key:
     raise ValueError("GEMINI_API_KEY environment variable is required")
 
 genai.configure(api_key=gemini_api_key)
-model = genai.GenerativeModel('gemini-2.0-flash')
+
+# Configure generation settings for better accuracy with blurry/low-quality images
+generation_config = {
+    "temperature": 0.1,  # Lower temperature for more deterministic/accurate extraction
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 8192,
+}
+
+model = genai.GenerativeModel(
+    'gemini-2.0-flash',
+    generation_config=generation_config
+)
 
 def get_gemini_prompt():
     """Get the Gemini AI prompt for universal receipt OCR processing"""
@@ -49,29 +61,78 @@ def get_gemini_prompt():
   "merchant_name": "store/restaurant/pharmacy name or null",
   "merchant_contact": "phone number or contact info or null",
   "transaction_date": "date in YYYY-MM-DD format or null",
-  "total_amount": "total amount as number or null",
-  "tax": "tax amount as number or null",
+  "transaction_time": "time in HH:MM:SS format (24-hour) or null if not visible on receipt",
+  "total_amount": "total amount as number (preserve exact sign: positive for credits/refunds, negative for charges/debits) or null",
+  "tax": "tax amount as number (preserve exact sign) or null",
+  "category": "REQUIRED - Must be one of these exact values: FOOD_DINING, TRANSPORTATION, BILLS_UTILITIES, GROCERY, ENTERTAINMENT, HEALTH_FITNESS, EDUCATION, SHOPPING, or OTHER/GENERAL - NEVER null",
+
   "items": [
     {
       "quantity": "number of items purchased (as number) or 1 if not specified",
       "item_name": "item name/description",
-      "item_price": "price per individual item or total price for this line item (as number)"
+      "item_price": "price per individual item or total price for this line item (as number, preserve exact sign: positive for credits/refunds, negative for charges)"
     }
   ]
 }
 
-Instructions:
+NOTE: Do NOT include a "timestamp" field in your response. The timestamp will be added automatically by the system after extraction.
+
+CRITICAL INSTRUCTIONS FOR AMOUNT EXTRACTION:
+- **PRESERVE EXACT SIGNS**: Extract amounts with their EXACT sign as shown in the receipt
+  * If the receipt shows a POSITIVE amount, credit, or refund (e.g., "+50.00", "CR 50.00", "REFUND 50.00") → extract as POSITIVE number (50.00)
+  * If the receipt shows a NEGATIVE amount, charge, or debit (e.g., "-50.00", "DR 50.00", "CHARGE 50.00") → extract as NEGATIVE number (-50.00)
+  * If no sign is shown, extract as-is (typically positive for standard purchases)
+- **DO NOT MODIFY SIGNS**: Never convert positive amounts to negative or vice versa
+- **HANDLE BLURRY IMAGES**: Even if the image is blurry or low quality, extract the most accurate data possible. If uncertain about a value, use null rather than guessing
+
+CRITICAL INSTRUCTIONS FOR CATEGORY FIELD:
+- **CATEGORY IS REQUIRED**: The category field must ALWAYS be populated and NEVER be null
+- **USE ONLY PREDEFINED CATEGORIES**: You must select ONE of these exact category values:
+  * **FOOD_DINING** - Restaurants, cafes, fast food, coffee shops, bars, food delivery, dining out
+  * **TRANSPORTATION** - Gas stations, fuel, parking, tolls, public transit, ride-sharing (Uber/Lyft), car maintenance, auto repairs
+  * **BILLS_UTILITIES** - Electric bills, water bills, gas bills, internet, phone bills, cable/streaming subscriptions, rent, insurance payments
+  * **GROCERY** - Supermarkets, grocery stores, food markets, wholesale clubs (Costco, Sam's Club)
+  * **ENTERTAINMENT** - Movies, concerts, events, sports tickets, gaming, hobbies, recreation, theme parks
+  * **HEALTH_FITNESS** - Pharmacies, drugstores, medical services, hospitals, clinics, gyms, fitness centers, health supplements, wellness
+  * **EDUCATION** - Schools, tuition, books, courses, training, educational materials, school supplies
+  * **SHOPPING** - Retail stores, clothing, electronics, home goods, department stores, online shopping, general merchandise
+- **Infer from merchant name and items**: Analyze the merchant name and purchased items to determine the best matching category
+- **Examples of category mapping**:
+  * "Starbucks" or "McDonald's" → FOOD_DINING
+  * "Shell Gas" or "Chevron" → TRANSPORTATION
+  * "Verizon" or "Electric Company" → BILLS_UTILITIES
+  * "Walmart Grocery" or "Whole Foods" → GROCERY
+  * "AMC Theaters" or "Netflix" → ENTERTAINMENT
+  * "CVS Pharmacy" or "24 Hour Fitness" → HEALTH_FITNESS
+  * "University Bookstore" or "Coursera" → EDUCATION
+  * "Target" or "Amazon" or "Best Buy" → SHOPPING
+- **Default fallback**: If category cannot be determined with certainty, use "OTHER" (NEVER use null)
+
+CRITICAL INSTRUCTIONS FOR DATE AND TIME EXTRACTION:
+- **Extract transaction_date**: Always extract the date in YYYY-MM-DD format if visible
+- **Extract transaction_time**: Look for time on the receipt (usually near the date)
+  * Format: HH:MM:SS in 24-hour format (e.g., "14:30:00" for 2:30 PM)
+  * If only hours and minutes are shown (e.g., "14:30"), add ":00" for seconds → "14:30:00"
+  * If time is in 12-hour format with AM/PM, convert to 24-hour format
+  * If time is NOT visible on the receipt, set transaction_time to null
+- **Examples**:
+  * Receipt shows "2:30 PM" → transaction_time: "14:30:00"
+  * Receipt shows "09:45" → transaction_time: "09:45:00"
+  * Receipt shows "23:15:30" → transaction_time: "23:15:30"
+  * No time visible → transaction_time: null
+
+General Instructions:
 - Extract merchant_name from any business name visible on the receipt (restaurant, store, pharmacy, etc.)
 - Extract merchant_contact if phone number or contact info is visible, otherwise use null
 - For items array, include ALL line items visible on the receipt
 - If quantity is not explicitly shown, use 1 as default
-- For item_price, extract the price shown for that specific line item
-- Use null for any field where information is missing, unclear, or not visible
-- Ensure all prices are extracted as numbers (not strings)
+- For item_price, extract the price shown for that specific line item WITH ITS EXACT SIGN
+- Use null for any field where information is missing, unclear, or not visible (EXCEPT category - never null)
+- Ensure all prices are extracted as numbers (not strings) but PRESERVE their signs
 - Include as many items as are visible on the receipt
 - Return ONLY valid JSON without any comments or markdown formatting
 
-Important: Only extract information that is clearly visible and readable in the receipt image. Focus on accuracy over completeness."""
+Important: Only extract information that is clearly visible and readable in the receipt image. Focus on accuracy over completeness. NEVER modify the sign of any monetary amount. ALWAYS provide a category from the predefined list (use "OTHER" if uncertain)."""
 
 def process_image_with_gemini(image: Image.Image) -> str:
     """Process image with Gemini API to extract structured JSON"""
@@ -162,12 +223,29 @@ async def upload_image(
                 }
             )
 
+        # Add timestamp to parsed data (ISO 8601 format)
+        extraction_timestamp = pd.Timestamp.now(tz='UTC').isoformat()
+        if isinstance(parsed_data, dict):
+            parsed_data["timestamp"] = extraction_timestamp
+
         # Process and validate data
         validation_errors = []
         warnings = []
 
+        # Enforce category requirement - NEVER allow null
+        if isinstance(parsed_data, dict):
+            category = parsed_data.get("category")
+            if not category or category is None or (isinstance(category, str) and category.strip() == ""):
+                parsed_data["category"] = "OTHER"
+                warnings.append("Category was not provided by OCR, defaulted to 'OTHER'")
+
         # Basic validation for required fields
         if isinstance(parsed_data, dict):
+            # Validate category (must never be null after enforcement)
+            category = parsed_data.get("category")
+            if not category or category is None:
+                validation_errors.append("Category is required and cannot be null")
+
             # Validate merchant_name
             if not parsed_data.get("merchant_name"):
                 warnings.append("Merchant name not found or unclear in the receipt")
@@ -355,12 +433,29 @@ async def extract_data():
                 }
             )
 
+        # Add timestamp to parsed data (ISO 8601 format)
+        extraction_timestamp = pd.Timestamp.now(tz='UTC').isoformat()
+        if isinstance(parsed_data, dict):
+            parsed_data["timestamp"] = extraction_timestamp
+
         # Process data validation (same logic as upload endpoint)
         validation_errors = []
         warnings = []
 
+        # Enforce category requirement - NEVER allow null
+        if isinstance(parsed_data, dict):
+            category = parsed_data.get("category")
+            if not category or category is None or (isinstance(category, str) and category.strip() == ""):
+                parsed_data["category"] = "OTHER"
+                warnings.append("Category was not provided by OCR, defaulted to 'OTHER'")
+
         # Basic validation for required fields
         if isinstance(parsed_data, dict):
+            # Validate category (must never be null after enforcement)
+            category = parsed_data.get("category")
+            if not category or category is None:
+                validation_errors.append("Category is required and cannot be null")
+
             # Validate merchant_name
             if not parsed_data.get("merchant_name"):
                 warnings.append("Merchant name not found or unclear in the receipt")
