@@ -10,23 +10,22 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from PIL import Image
 import pandas as pd
-from app_utils import clean_json_string
+from OCR.utils import clean_json_string
 import json
 import os
 import uuid
 import tempfile
 from typing import Dict
 from fastapi.responses import RedirectResponse
+from fastapi import APIRouter
 
 load_dotenv()
 
+router = APIRouter(prefix="/OCR", tags=["OCR"])
+
 # Initialize FastAPI app
-app = FastAPI(
-    title="OCR Image Processing API",
-    description="Simple OCR API - upload images and get extracted data automatically",
-    version="5.0.0"
-)
-@app.get("/", include_in_schema=False) 
+
+@router.get("/", include_in_schema=False) 
 async def root():
     return RedirectResponse(url="/docs")
 
@@ -146,7 +145,7 @@ def validate_image_file(file: UploadFile) -> bool:
     return file.content_type in allowed_types
 
 
-@app.post("/upload-image")
+@router.post("/upload-image")
 async def upload_image(
     file: UploadFile = File(...)
 ):
@@ -341,7 +340,7 @@ async def upload_image(
             }
         )
 
-@app.get("/extract-data")
+@router.get("/extract-data")
 async def extract_data():
     """
     Retrieve OCR data from the most recently uploaded and processed image

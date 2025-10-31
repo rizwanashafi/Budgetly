@@ -6,14 +6,9 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any
 from dotenv import load_dotenv
 import traceback
+from fastapi import APIRouter
 
-# --- 1. INITIAL SETUP & CONFIGURATION ---
-
-app = FastAPI(
-    title="Smart Budget Analyzer API",
-    description="An API that uses Google Gemini to analyze budget data and provide financial advice.",
-    version="1.8.0",  # Final Corrected Version
-)
+router = APIRouter(prefix="/ai_insights", tags=["AI Insights"])
 
 load_dotenv()
 
@@ -92,7 +87,7 @@ Respond **only** with a clean JSON object in this structure:
 
 # --- 4. ENDPOINT IMPLEMENTATION ---
 
-@app.post("/analyze-budget", response_model=Dict[str, Any])
+@router.post("/analyze-budget", response_model=Dict[str, Any])
 async def analyze_budget(budget_input: BudgetInput):
     critical_alert_section = ""
     overspent_categories = []
@@ -166,6 +161,6 @@ async def analyze_budget(budget_input: BudgetInput):
 
 # --- 5. HEALTH CHECK ENDPOINT ---
 
-@app.get("/")
+@router.get("/")
 def read_root():
     return {"status": "Budget Analyzer API is running"}
