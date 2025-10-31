@@ -88,7 +88,7 @@ CRITICAL INSTRUCTIONS FOR AMOUNT EXTRACTION:
 CRITICAL INSTRUCTIONS FOR CATEGORY FIELD:
 - **CATEGORY IS REQUIRED**: The category field must ALWAYS be populated and NEVER be null
 - **USE ONLY PREDEFINED CATEGORIES**: You must select ONE of these exact category values:
-  * **FOOD_DINING** - Restaurants, cafes, fast food, coffee shops, bars, food delivery, dining out
+  * **FOOD_DINING** - Restaurants, cafes, fast food, coffee shops, bars, food delivery, and dining out.
   * **TRANSPORTATION** - Gas stations, fuel, parking, tolls, public transit, ride-sharing (Uber/Lyft), car maintenance, auto repairs
   * **BILLS_UTILITIES** - Electric bills, water bills, gas bills, internet, phone bills, cable/streaming subscriptions, rent, insurance payments
   * **GROCERY** - Supermarkets, grocery stores, food markets, wholesale clubs (Costco, Sam's Club)
