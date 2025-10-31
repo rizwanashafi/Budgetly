@@ -7,8 +7,14 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 import traceback
 from fastapi import APIRouter
+from fastapi.responses import RedirectResponse
+
 
 router = APIRouter(prefix="/ai_insights", tags=["AI Insights"])
+
+@router.get("/", include_in_schema=False) 
+async def root():
+    return RedirectResponse(url="/docs")
 
 load_dotenv()
 
