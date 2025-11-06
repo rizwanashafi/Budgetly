@@ -3,7 +3,7 @@ import json
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 import traceback
 from fastapi import APIRouter
@@ -11,6 +11,8 @@ from fastapi.responses import RedirectResponse
 
 
 router = APIRouter(prefix="/ai_insights", tags=["AI Insights"])
+
+LATEST_ANALYSIS_RESULT: Dict[str, Any] = {}
 
 @router.get("/", include_in_schema=False) 
 async def root():
@@ -53,7 +55,9 @@ class BudgetInput(BaseModel):
             ]
         }
     }
-
+class InsightsResponse(BaseModel):
+    key_observations: List[str]
+    ai_recommendations: List[str]
 # --- 3. PROMPT TEMPLATE ---
 
 PROMPT_TEMPLATE = """
@@ -95,6 +99,7 @@ Respond **only** with a clean JSON object in this structure:
 
 @router.post("/analyze-budget", response_model=Dict[str, Any])
 async def analyze_budget(budget_input: BudgetInput):
+    global LATEST_ANALYSIS_RESULT 
     critical_alert_section = ""
     overspent_categories = []
 
@@ -146,6 +151,8 @@ async def analyze_budget(budget_input: BudgetInput):
 
         try:
             json_response = json.loads(cleaned_json_str)
+            LATEST_ANALYSIS_RESULT = json_response
+            # json_response = json.loads(cleaned_json_str)
         except json.JSONDecodeError as e:
             print(f"--- FAILED TO DECODE JSON ---\n{cleaned_json_str}\n--- END OF FAILED STRING ---")
             raise ValueError(f"Invalid JSON format returned: {e}")
@@ -167,6 +174,25 @@ async def analyze_budget(budget_input: BudgetInput):
 
 # --- 5. HEALTH CHECK ENDPOINT ---
 
-@router.get("/")
-def read_root():
-    return {"status": "Budget Analyzer API is running"}
+# @router.get("/")
+# def read_root():
+#     return {"status": "Budget Analyzer API is running"}
+@router.get("/latest-insights", response_model=InsightsResponse)
+async def get_latest_insights():
+    """
+    Retrieve the key observations and AI recommendations from the most recent analysis.
+    """
+    # Check if a result has been generated yet
+    if not LATEST_ANALYSIS_RESULT:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No analysis has been performed yet. Please POST to /analyze-budget first."
+        )
+
+    # Create the specific response you want from the stored result
+    insights_data = {
+        "key_observations": LATEST_ANALYSIS_RESULT.get("key_observations", []),
+        "ai_recommendations": LATEST_ANALYSIS_RESULT.get("ai_recommendations", [])
+    }
+
+    return insights_data
