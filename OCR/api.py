@@ -73,7 +73,9 @@ If the image **is** a valid receipt, extract the following fields in **standardi
   "transaction_date": "date in YYYY-MM-DD format or null",
   "transaction_time": "time in HH:MM:SS (24-hour) format or null if not visible",
   "total_amount": "total amount as number (preserve exact sign: positive for credits/refunds, negative for charges/debits) or null",
-  "tax": "tax amount as number (preserve exact sign) or null",
+  "subtotal_amount": "subtotal amount as number (retain the original sign) or null",
+  "discount_amount": "total discount or promotion amount as a number (typically negative) or null",
+  "tax": "tax amount as number (retain the original sign) or null",
   "category": "REQUIRED - Must be one of: FOOD_DINING, TRANSPORTATION, BILLS_UTILITIES, GROCERY, ENTERTAINMENT, HEALTH_FITNESS, EDUCATION, SHOPPING, or OTHER/GENERAL (never null)",
   "items": [
     {

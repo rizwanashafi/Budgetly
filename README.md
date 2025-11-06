@@ -36,7 +36,7 @@ GEMINI_API_KEY=your_gemini_api_key
 ### 3. Run the FastAPI Application
 
 ```bash
-uvicorn fastapi_app:app --reload
+uvicorn main:app --reload
 ```
 
 The API will be available at: `http://localhost:8000`
