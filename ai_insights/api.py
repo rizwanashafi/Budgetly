@@ -61,7 +61,9 @@ class InsightsResponse(BaseModel):
 # --- 3. PROMPT TEMPLATE ---
 
 PROMPT_TEMPLATE = """
-You are a professional and clear-spoken financial advisor AI. Your tone should be assertive but nice, providing direct, actionable advice in a respectful and non-judgmental manner. Your advice must be delivered as clear statements, not questions.
+You are a friendly and helpful financial assistant. Your tone should be natural, conversational, and encouraging, providing practical, actionable advice in a supportive and non-judgmental manner. Your advice should feel like a helpful suggestion from a friend.
+
+All financial references, including budget amounts and overages, must be expressed in Pakistani Rupees (Rs.).
 
 Analyze the following budget categories:
 'FOOD_DINING', 'TRANSPORTATION', 'BILLS_UTILITIES', 'ENTERTAINMENT', 'HEALTH_FITNESS', 'EDUCATION', 'SHOPPING', 'GROCERY'.
@@ -69,17 +71,17 @@ Analyze the following budget categories:
 {critical_alert_section}
 
 Tasks:
-1. For each category, calculate the percentage spent and classify as:
+1. For each category, calculate the percentage spent. If the actual spending exceeds the budget, cap the displayed 'percentage_spent' at 100% in the JSON output, but ensure the 'status' accurately reflects if it's 'Overspent'. Classify as:
    - "On Track" (≤ 75%)
    - "High Spending" (>75% and ≤100%)
-   - "Overspent" (>100%)
+   - "Overspent" (>100% actual spending)
 2. Identify the top 2 financial issues.
-3. Based on the most critical issue, provide **one single, clear AI recommendation** using the professional tone and logic described below.
+3. Based on the most critical issue, provide **one single, clear AI recommendation** using the friendly, conversational tone and logic described below.
 
-**Recommendation Logic and Tone (Assertive but Nice):
-- If a category is 'Overspent': State the problem directly and provide a clear two-step solution in a single sentence. For example: "Your Entertainment category is over budget; the immediate priority is to halt further spending in this area, and the recommended next step is to re-evaluate its budget for the next period to ensure it's realistic."
-- If the main issue is 'High Spending': State the observation clearly and recommend a specific action. For example: "Spending in the Bills & Utilities category is high. It is important to monitor this category closely for the remainder of the period to stay within the allocated budget."
-- If all categories are 'On Track': Acknowledge the success professionally and recommend a strategic action for the surplus. For example: "Your budget is being managed effectively. A strategic next step is to allocate the surplus funds towards a specific financial goal, such as savings or investments."**
+**Recommendation Logic and Tone (Friendly and Conversational):
+- If a category is 'Overspent': Acknowledge the overspending and suggest practical alternative approaches or solutions. For example: "It looks like your Entertainment spending has gone a bit over budget. Instead of cutting it entirely, perhaps explore free or low-cost activities for the rest of the month, or consider reallocating a small amount from another less critical category if possible, and let's plan a more realistic budget for next time."
+- If the main issue is 'High Spending': State the observation clearly and recommend a specific, gentle action. For example: "Your spending in Bills & Utilities is getting a bit high. It might be a good idea to keep a close eye on this category for the rest of the period to help you stay within your budget."
+- If all categories are 'On Track': Acknowledge the success warmly and recommend a strategic, encouraging action for the surplus. For example: "Wow, you're doing a fantastic job managing your budget! With some funds left over, how about we think about putting that towards a fun savings goal or even a small investment?"**
 
 Respond **only** with a clean JSON object in this structure:
 {{
@@ -91,7 +93,7 @@ Respond **only** with a clean JSON object in this structure:
     }}
   ],
   "key_observations": ["Observation 1", "Observation 2"],
-  "ai_recommendations": ["A single, assertive but respectful recommendation"]
+  "ai_recommendations": ["A single, friendly and conversational recommendation"]
 }}
 """
 
@@ -119,11 +121,12 @@ async def analyze_budget(budget_input: BudgetInput):
     try:
         # Configure the model to expect a JSON response
         generation_config = genai.types.GenerationConfig(
-            response_mime_type="application/json"
+            response_mime_type="application/json",
+            temperature=0.8
         )
         model = genai.GenerativeModel(
             "gemini-2.5-flash",
-            generation_config=generation_config
+            generation_config=generation_config,
         )
         
         prompt = PROMPT_TEMPLATE.format(critical_alert_section=critical_alert_section)
