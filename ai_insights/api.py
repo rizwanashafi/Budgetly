@@ -125,7 +125,7 @@ async def analyze_budget(budget_input: BudgetInput):
             temperature=0.8
         )
         model = genai.GenerativeModel(
-            "gemini-2.0-flash",
+            "gemini-2.5-flash",
             generation_config=generation_config,
         )
         
