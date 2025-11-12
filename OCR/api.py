@@ -54,18 +54,16 @@ model = genai.GenerativeModel(
 
 def get_gemini_prompt():
     """Get the Gemini AI prompt for universal receipt OCR processing"""
-    return """You are an OCR assistant that extracts structured data from **receipt images only**.
+    return """You are an OCR assistant that extracts structured data from receipt images only..
 
-If the uploaded image is **NOT a receipt**, respond with this exact JSON:
+If the uploaded image is NOT a receipt, respond with exactly:
 {
   "error": "Invalid image. Please upload a valid receipt for OCR processing."
 }
 
----
+RECEIPT OCR INSTRUCTIONS
 
-### RECEIPT OCR INSTRUCTIONS
-
-If the image **is** a valid receipt, extract the following fields in **standardized JSON** format:
+If the image is a valid receipt, extract the following fields in JSON format:
 
 {
   "merchant_name": "store/restaurant/pharmacy name or null",
@@ -86,21 +84,15 @@ If the image **is** a valid receipt, extract the following fields in **standardi
   ]
 }
 
-Do NOT include a "timestamp" field — it will be added automatically by the system.
+Do NOT include a timestamp field — it will be added automatically.
 
----
+CRITICAL RULES:
+1. Amounts:
+- Preserve the exact sign (+/-). Positive → credits/refunds, Negative → charges/debits.
+- Do not infer or modify signs. If unclear → null.
 
-### CRITICAL RULES
-
-**Amount Extraction**
-- Preserve the **exact sign** (+ or -) as shown on the receipt.
-- Positive → credits/refunds (e.g., "+50.00", "CR 50.00", "REFUND 50.00")
-- Negative → charges/debits (e.g., "-50.00", "DR 50.00", "CHARGE 50.00")
-- Never modify or infer signs.
-- If uncertain or unreadable, return `null`.
-
-**Category Field**
-- **Required field**, never null.
+2. Category Field:
+- Required field, never null.
 - Must be one of:
   - FOOD_DINING — Restaurants, cafes, bars, delivery, etc.
   - TRANSPORTATION — Gas, parking, tolls, public transit, ride-share, auto repair.
@@ -122,28 +114,22 @@ Do NOT include a "timestamp" field — it will be added automatically by the sys
   - "University Bookstore", "Coursera" → EDUCATION
   - "Target", "Amazon", "Best Buy" → SHOPPING
 
-**Date & Time Extraction**
-- Extract `transaction_date` in `YYYY-MM-DD`.
-- Extract `transaction_time` in `HH:MM:SS` (24-hour format).
-- Convert 12-hour format to 24-hour if necessary.
-- If only hours/minutes visible, append “:00”.
-- If time not visible → `null`.
+3. Date & Time:
+- Date: YYYY-MM-DD
+- Time: HH:MM:SS (24-hour). Convert 12-hour → 24-hour. Append ":00" if minutes only.
+- If missing → null.
 
-Examples:
-- "2:30 PM" → "14:30:00"
-- "09:45" → "09:45:00"
-- "23:15:30" → "23:15:30"
-
----
-
-### GENERAL INSTRUCTIONS
+4. GENERAL INSTRUCTIONS:
 - Use null for any missing or unclear fields, except for the category field — it should never be null.
-- If the receipt does not explicitly mention a category, infer and return the most appropriate category based on the receipt content.
-- Return **only valid JSON**, no markdown or extra text.
-- Do **not** mix error responses with receipt data.
+- Extract exactly what is visible, even blurry text — do not assume or fabricate data.
+- Return only valid JSON, no markdown or extra text.
+- Do not mix error responses with receipt data.
 
 ---
-Important: Extract all the information that is clearly visible and readable as well as blurry on the receipt image. Focus on accuracy over completeness. NEVER modify the sign of any monetary amount. ALWAYS provide a category from the predefined list (use "OTHER" if uncertain)."""
+Important: Extract all the information that is clearly visible and readable as well as blurry on the receipt image. If the receipt explicitly mentions a business 
+type (e.g., "ABC Supermarket"), always assign the corresponding category, 
+even if the brand sells multiple types of products focus on accuracy over completeness.
+"""
 
 def process_image_with_gemini(image: Image.Image) -> str:
     """Process image with Gemini API to extract structured JSON"""
